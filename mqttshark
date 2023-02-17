@@ -1,0 +1,906 @@
+#!/usr/bin/env python3
+
+# (C) 2023  Roger Light <roger@atchoo.org>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import argparse
+import json
+import subprocess
+import sys
+
+# ============================================================
+# CONSTANTS
+# ============================================================
+
+ansi_reset = "\u001b[0m"
+ansi_error = "\u001b[31;7m"
+ansi_red = "\u001b[31m"
+ansi_green = "\u001b[32m"
+ansi_yellow = "\u001b[33m"
+ansi_blue = "\u001b[34m"
+ansi_magenta = "\u001b[35m"
+ansi_cyan = "\u001b[36m"
+ansi_white = "\u001b[37m"
+ansi_br_black = "\u001b[90m"
+ansi_br_red = "\u001b[91m"
+ansi_br_green = "\u001b[92m"
+ansi_br_yellow = "\u001b[93m"
+ansi_br_blue = "\u001b[94m"
+ansi_br_magenta = "\u001b[95m"
+ansi_br_cyan = "\u001b[96m"
+ansi_br_white = "\u001b[97m"
+
+connack_strings = {
+    "0": "accepted",
+    "1": "refused: protocol version",
+    "2": "refused: identifier rejected",
+    "3": "refused: server unavailable",
+    "4": "refused: bad username or password",
+    "5": "refused: not authorized",
+}
+
+reason_code_strings = {
+    "0": "success",
+    "4": "disconnect with will message",
+    "16": "no matching subscribers",
+    "17": "no subscription existed",
+    "24": "continue authentication",
+    "25": "reauthenticate",
+    "128": "unspecified",
+    "129": "malformed packet",
+    "130": "protocol error",
+    "131": "implementation specific",
+    "132": "unsupported protocol version",
+    "133": "clientid not valid",
+    "134": "bad username or password",
+    "135": "not authorized",
+    "136": "server unavailable",
+    "137": "server busy",
+    "138": "banned",
+    "139": "server shutting down",
+    "140": "bad authentication method",
+    "141": "keep alive timeout",
+    "142": "session taken over",
+    "143": "topic filter invalid",
+    "144": "topic name invalid",
+    "145": "packet id in use",
+    "146": "packet id not found",
+    "147": "receive maximum exceeded",
+    "148": "topic alias invalid",
+    "149": "packet too large",
+    "150": "message rate too high",
+    "151": "quota exceeded",
+    "152": "administrative action",
+    "153": "payload format invalid",
+    "154": "retain not supported",
+    "155": "qos not supported",
+    "156": "use another server",
+    "157": "server moved",
+    "158": "shared subscriptions not supported",
+    "159": "connection rate exceeded",
+    "160": "maximum connection time",
+    "161": "subscription identifiers not supported",
+    "162": "wildcard subscriptions not supported",
+}
+
+all_props = {
+   "0x01": ("payload-format-indicator", "num"),
+   "0x02": ("message-expiry-interval", "num"),
+   "0x03": ("content-type", "string"),
+   "0x08": ("response-topic", "string"),
+   "0x09": ("correlation-data", "string"),
+   "0x0b": ("subscription-identifier", "num"),
+   "0x11": ("session-expiry-interval", "num"),
+   "0x12": ("assigned-client-identifier", "string"),
+   "0x13": ("server-keep-alive", "num"),
+   "0x15": ("authentication-method", "string"),
+   "0x16": ("authentication-data", "string"),
+   "0x17": ("request-problem-information", "string"),
+   "0x18": ("will-delay-interval", "num"),
+   "0x19": ("request-response-information", "num"),
+   "0x1a": ("response-information", "string"),
+   "0x1c": ("server-reference", "string"),
+   "0x1f": ("reason-string", "string"),
+   "0x21": ("receive-maximum", "num"),
+   "0x22": ("topic-alias-maximum", "num"),
+   "0x23": ("topic-alias", "num"),
+   "0x24": ("maximum-qos", "num"),
+   "0x25": ("retain-available", "num"),
+   "0x26": ("user-property", "stringpair"),
+   "0x27": ("maximum-packet-size", "num"),
+   "0x28": ("wildcard-subscription-available", "num"),
+   "0x29": ("subscription-identifier-available", "num"),
+   "0x2a": ("shared-subscription-available", "num"),
+}
+
+origin_b = f"{ansi_green}B{ansi_reset}"
+origin_c = f"{ansi_magenta}C{ansi_reset}"
+
+# ============================================================
+# GLOBAL VARS
+# ============================================================
+
+# ANSI colour codes
+all_colours = [31, 32, 33, 34, 35, 36, 37, 90, 91, 92, 93, 94, 95, 96, 97]
+
+# Mapping variable to keep track of whether a src port is a client/broker
+client_mapping = {}
+
+# Mapping variable to keep consistent colours for sessions
+session_ports = {}
+
+# String that the current packet timestamp is written to before being printed.
+# This is used to allow futher lines to print with the correct offset.
+timestr = ""
+
+# Timestamp of the first packet received.
+epoch = -1
+
+# ============================================================
+# Helper functions
+# ============================================================
+
+def next_colour():
+    """Rotate ansi colour codes for client sessions"""
+    c = all_colours.pop(0)
+    all_colours.append(c)
+    return c
+
+
+def print_timestamp(packet):
+    """Print the packet timestamp. If the packet is malformed, use error colour."""
+    global epoch
+    global timestr
+
+    ts = packet['timestamp']
+
+    if epoch == -1:
+        epoch = int(ts)
+        ts = 0
+    else:
+        ts = int(ts) - epoch
+
+    try:
+        ws_malformed = packet['layers']['_ws_malformed']
+        malformed = True
+    except KeyError:
+        malformed = False
+
+    timestr = "%.5f" % (ts/1000)
+    if malformed:
+        print(f"{ansi_error}{timestr}{ansi_reset}", end="")
+    else:
+        print(f"{timestr}", end="")
+
+
+def print_offset():
+    """Print sufficient spaces to allow the correct offset on follow up lines."""
+    global timestr
+    print(" "*(len(timestr)+1+5+2+5+1+2+1+11), end="")
+
+
+def print_properties(args, mqtt):
+    """Print properties for a packet."""
+    if args.no_properties:
+        return
+    try:
+        prop_ids = mqtt['mqtt_mqtt_property_id']
+        if not isinstance(prop_ids, list):
+            prop_ids = [prop_ids]
+    except KeyError:
+        return
+
+    try:
+        prop_keys = mqtt['mqtt_mqtt_prop_key']
+        if not isinstance(prop_keys, list):
+            prop_keys = [prop_keys]
+    except KeyError:
+        prop_keys = None
+
+    try:
+        prop_values = mqtt['mqtt_mqtt_prop_value']
+        if not isinstance(prop_values, list):
+            prop_values = [prop_values]
+    except KeyError:
+        prop_values = None
+
+    try:
+        prop_strings = mqtt['mqtt_mqtt_prop_string']
+        if not isinstance(prop_strings, list):
+            prop_strings = [prop_strings]
+    except KeyError:
+        prop_strings = None
+
+    try:
+        prop_numbers = mqtt['mqtt_mqtt_prop_number']
+        if not isinstance(prop_numbers, list):
+            prop_numbers = [prop_numbers]
+    except KeyError:
+        prop_numbers = None
+
+    for prop_id in prop_ids:
+        print_offset()
+        try:
+            (name, prop_type) = all_props[prop_id]
+            key = None
+            colour = ansi_br_blue
+            if prop_type == "num":
+                try:
+                    value = prop_numbers.pop(0)
+                except AttributeError:
+                    colour = ansi_error
+                    value = "?"
+            elif prop_type == "string":
+                try:
+                    value = prop_strings.pop(0)
+                except AttributeError:
+                    colour = ansi_error
+                    value = "?"
+            elif prop_type == "stringpair":
+                try:
+                    key = prop_keys.pop(0)
+                except AttributeError:
+                    colour = ansi_error
+                    key = "?"
+                try:
+                    value = prop_values.pop(0)
+                except AttributeError:
+                    colour = ansi_error
+                    value = "?"
+            if key is None:
+                print(f"{name} {colour}{value}{ansi_reset}")
+            else:
+                print(f"{name} {colour}{key}={value}{ansi_reset}")
+        except KeyError:
+            print("? %s" % prop_id)
+
+
+def print_mid(mqtt):
+    try:
+        mid = mqtt['mqtt_mqtt_msgid']
+        mid_colour = ansi_br_cyan
+    except KeyError:
+        mid = "?"
+        mid_colour = ansi_error
+
+    print(f" mid={mid_colour}{mid}{ansi_reset}", end="")
+
+
+def print_session_ports(packet):
+    srcport = packet['layers']['tcp']['tcp_tcp_srcport']
+    dstport = packet['layers']['tcp']['tcp_tcp_dstport']
+
+    key = "%5s-►%-5s" % (srcport, dstport)
+    try:
+        print(session_ports[key], end="")
+    except KeyError:
+        colour = next_colour()
+
+        s1 = " \u001b[%dm%5s\u001b[0m-►\u001b[%dm%-5s\u001b[0m" % (colour, srcport, colour, dstport)
+        session_ports[key] = s1
+        print(s1, end="")
+
+        key2 = "%5s-►%-5s" % (dstport, srcport)
+        s2 = " \u001b[%dm%5s\u001b[0m-►\u001b[%dm%-5s\u001b[0m" % (colour, dstport, colour, srcport)
+        session_ports[key2] = s2
+
+
+def set_client_mapping(packet):
+    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
+    dst = "%s:%s" % (packet['layers']['ip']['ip_ip_dst'], packet['layers']['tcp']['tcp_tcp_dstport'])
+    try:
+        c = client_mapping[src]
+    except KeyError:
+        client_mapping[src] = "C"
+    try:
+        c = client_mapping[dst]
+    except KeyError:
+        client_mapping[dst] = "B"
+
+
+def check_client_mapping(packet):
+    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
+    try:
+        c = client_mapping[src]
+        return c
+    except KeyError:
+        return "?"
+
+
+def print_origin(packet, expected=None):
+    r = check_client_mapping(packet)
+    if expected is not None:
+        if r == expected:
+            print("  ", end="")
+        else:
+            print(f" {ansi_error}{r}{ansi_reset}", end="")
+    else:
+        print(f" {r}", end="")
+
+
+
+# ============================================================
+# Packet printing functions
+# ============================================================
+
+def print_malformed(args, packet, mqtt):
+    """Called if a very malformed packet is received"""
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "")
+    print(f" {ansi_error}????????{ansi_reset}")
+
+
+def print_reserved(args, packet, mqtt):
+    """Print RESERVED packet"""
+    if "RESERVED" in args.suppress or (len(args.pick) > 0 and "RESERVED" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "")
+    print(f" {ansi_error}RESERVED{ansi_reset}    rl={mqtt['mqtt_mqtt_len']} {mqtt['mqtt_mqtt_hdrflags']}")
+    print_properties(args, mqtt)
+
+
+def print_will(args, mqtt):
+    global timestr
+    try:
+        flag = mqtt['mqtt_mqtt_conflag_willflag']
+    except KeyValue:
+        return
+    if flag == False:
+        return
+
+    try:
+        topic = mqtt['mqtt_mqtt_willtopic']
+        if len(topic) > args.truncate_topic:
+            topic = topic[:args.truncate_topic] + "…"
+        topic_colour = ansi_br_yellow
+    except KeyError:
+        topic = "?"
+        topic_colour = ansi_error
+
+    try:
+        qos = mqtt['mqtt_mqtt_conflag_qos']
+        qos_colour = ansi_br_cyan
+    except KeyError:
+        qos = "?"
+        qos_colour = ansi_error
+
+    try:
+        payload = mqtt['mqtt_mqtt_willmsg_text']
+        if len(payload) > args.truncate_payload:
+            payload = payload[:args.truncate_payload] + "…"
+        payload_colour = ansi_br_blue
+    except KeyError:
+        payload = "?"
+        payload_colour = ansi_error
+
+    print(" "*(len(timestr)+1+5+2+5+1+2), end="")
+    print(f"{ansi_br_blue}WILL{ansi_reset}        ", end="")
+    print(f"qos={qos_colour}{qos}{ansi_reset}", end="")
+    print(f'  topic="{topic_colour}{topic}{ansi_reset}"', end="")
+    print(f'  payload="{payload_colour}{payload}{ansi_reset}"', end="")
+    print("")
+    #print(mqtt['mqtt_mqtt_will_properties'])
+
+
+def print_connect(args, packet, mqtt):
+    """Print CONNECT packet"""
+    if "CONNECT" in args.suppress or (len(args.pick) > 0 and "CONNECT" not in args.pick):
+        return
+
+    protoname = mqtt['mqtt_mqtt_protoname']
+    protover = mqtt['mqtt_mqtt_ver']
+    try:
+        username = mqtt['mqtt_mqtt_username']
+    except KeyError:
+        username = ""
+    try:
+        password = mqtt['mqtt_mqtt_passwd']
+    except KeyError:
+        password = ""
+
+    try:
+        cleansession = mqtt['mqtt_mqtt_conflag_cleansess']
+        cs_colour = ansi_br_cyan
+    except KeyError:
+        cleansession = "?"
+        cs_colour = ansi_error
+    try:
+        keepalive = mqtt['mqtt_mqtt_kalive']
+        ka_colour = ansi_br_cyan
+    except KeyError:
+        keepalive = "?"
+        ka_colour = ansi_error
+
+    try:
+        clientid = mqtt['mqtt_mqtt_clientid']
+        if len(clientid) > args.truncate_clientid:
+            clientid = clientid[:args.truncate_clientid] + "…"
+        clientid_colour = ansi_br_cyan
+    except KeyError:
+        clientid = "?"
+        clientid_colour = ansi_error
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "C")
+    print(f' {ansi_yellow}CONNECT{ansi_reset}     ', end="")
+    print(f'clientid="{clientid_colour}{clientid}{ansi_reset}"  ', end="")
+    print(f'keepalive={ka_colour}{keepalive}{ansi_reset}  ', end="")
+    print(f'cleansession={cs_colour}{cleansession}{ansi_reset}  ', end="")
+    print(f'protover={ansi_br_cyan}{protover}{ansi_reset}')
+
+    if username != "" or password != "":
+        print_offset()
+        print(f'username="{ansi_br_cyan}{username}{ansi_reset}" ', end="")
+        print(f'password="{ansi_br_cyan}{password}{ansi_reset}"')
+    print_properties(args, mqtt)
+    print_will(args, mqtt)
+
+
+def print_connack(args, packet, mqtt):
+    """Print CONNACK packet"""
+    if "CONNACK" in args.suppress or "ACK" in args.suppress or (len(args.pick) > 0 and "CONNECT" not in args.pick):
+        return
+
+    try:
+        rc = mqtt['mqtt_mqtt_connack_reason_code']
+        rc_str = reason_code_strings[rc]
+    except KeyError:
+        try:
+            rc = mqtt['mqtt_mqtt_conack_val']
+            rc_str = connack_strings[rc]
+        except KeyError:
+            rc = "?"
+            rc_str = f"{ansi_error}?{ansi_reset}"
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "B")
+    print(f" {ansi_yellow}CONNACK{ansi_reset}", end="")
+    print(f"     rc={ansi_br_cyan}{rc}{ansi_reset} ({rc_str})")
+    print_properties(args, mqtt)
+
+
+def print_publish(args, packet, mqtt):
+    """Print PUBLISH packet"""
+    if "PUBLISH" in args.suppress or (len(args.pick) > 0 and "PUBLISH" not in args.pick):
+        return
+
+    try:
+        payload = mqtt['mqtt_mqtt_msg_text']
+        if len(payload) > args.truncate_payload:
+            payload = payload[:args.truncate_payload] + "…"
+        payload_colour = ansi_br_blue
+    except KeyError:
+        payload = "?"
+        payload_colour = ansi_error
+
+    qos = mqtt['mqtt_mqtt_qos']
+    if qos == "0":
+        col = ansi_green
+    elif qos == "1":
+        col = ansi_br_green
+    elif qos == "2":
+        col = ansi_cyan
+    else:
+        col = ansi_red
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet)
+    print(f" {col}PUBLISH({qos}){ansi_reset} ", end="")
+    if qos != "0":
+        print_mid(mqtt)
+
+    if mqtt['mqtt_mqtt_retain']:
+        print(f"  retain={ansi_br_cyan}1{ansi_reset}", end="")
+    else:
+        print(f"  retain={ansi_br_cyan}0{ansi_reset}", end="")
+
+    try:
+        topic = mqtt["mqtt_mqtt_topic"]
+        if len(topic) > args.truncate_topic:
+            topic = topic[:args.truncate_topic] + "…"
+        topic_colour = ansi_br_yellow
+    except KeyError:
+        topic = "?"
+        topic_colour = ansi_error
+
+    print(f'  topic="{topic_colour}{topic}{ansi_reset}"', end="")
+    print(f'  payload="{payload_colour}{payload}{ansi_reset}"')
+    print_properties(args, mqtt)
+
+
+def print_simple(args, name, colour, packet, mqtt):
+    """Print PUBACK/PUBREC/PUBREL/PUBCOMP packet"""
+    if "ACK" in args.suppress or "QOS-FLOW" in args.suppress:
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet)
+    print(f" {colour}{name}{ansi_reset}    ", end="")
+    print_mid(mqtt)
+    print("")
+    print_properties(args, mqtt)
+
+
+def print_subscribe(args, packet, mqtt):
+    """Print SUBSCRIBE packet"""
+    if "SUBSCRIBE" in args.suppress or (len(args.pick) > 0 and "SUBSCRIBE" not in args.pick):
+        return
+
+    topic_colour = ansi_br_yellow
+    try:
+        topic = mqtt['mqtt_mqtt_topic']
+    except KeyError:
+        topic = "?"
+        topic_colour = ansi_error
+
+    qos_colour = ansi_br_cyan
+    try:
+        qos = mqtt['mqtt_mqtt_subscription_options_qos']
+    except KeyError:
+        try:
+            qos = mqtt['mqtt_mqtt_sub_qos']
+        except KeyError:
+            qos = "?"
+            qos_colour = ansi_error
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "C")
+    print(f" {ansi_br_yellow}SUBSCRIBE{ansi_reset}  ", end="")
+    print_mid(mqtt)
+
+    if not isinstance(topic, list):
+        if len(topic) > args.truncate_topic:
+            topic = topic[:args.truncate_topic] + "…"
+        print(f'  qos={qos_colour}{qos}{ansi_reset}', end="")
+        print(f'  topic="{topic_colour}{topic}{ansi_reset}"')
+    else:
+        print("")
+        for i in range(0, len(topic)):
+            print_offset()
+            if len(topic[i]) > args.truncate_topic:
+                topic[i] = topic[i][:args.truncate_topic] + "…"
+            print(f'qos={qos_colour}{qos[i]}{ansi_reset}', end="")
+            print(f'  topic="{topic_colour}{topic[i]}{ansi_reset}"')
+    print_properties(args, mqtt)
+
+
+def print_suback(args, packet, mqtt):
+    """Print SUBACK packet"""
+    if "SUBACK" in args.suppress or "ACK" in args.suppress or (len(args.pick) > 0 and "SUBSCRIBE" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "B")
+    print(f" {ansi_br_yellow}SUBACK{ansi_reset}     ", end="")
+    print_mid(mqtt)
+    rc_colour = ansi_br_cyan
+    try:
+        reason_code = mqtt['mqtt_mqtt_suback_reason_code']
+    except KeyError:
+        try:
+            reason_code = mqtt['mqtt_mqtt_suback_qos']
+        except KeyError:
+            reason_code = "?"
+            rc_colour = ansi_error
+
+    if not isinstance(reason_code, list):
+        reason_code = [reason_code]
+    print(f"  rc={rc_colour}{reason_code[0]}{ansi_reset}", end="")
+    reason_code.pop(0)
+    for rc in reason_code:
+        print(f",{rc_colour}{rc}{ansi_reset}", end="")
+    print("")
+    print_properties(args, mqtt)
+
+
+def print_unsubscribe(args, packet, mqtt):
+    """Print UNSUBSCRIBE packet"""
+    if "UNSUBSCRIBE" in args.suppress or (len(args.pick) > 0 and "UNSUBSCRIBE" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "C")
+    print(f" {ansi_magenta}UNSUBSCRIBE{ansi_reset}", end="")
+    print_mid(mqtt)
+    try:
+        topic = mqtt['mqtt_mqtt_topic']
+        topic_colour = ansi_br_yellow
+    except KeyError:
+        topic = "?"
+        topic_colour = ansi_error
+
+    if not isinstance(topic, list):
+        if len(topic) > args.truncate_topic:
+            topic = topic[:args.truncate_topic] + "…"
+        print(f'  topic="{topic_colour}{topic}{ansi_reset}"')
+    else:
+        topic = [topic]
+        for i in range(0, len(topic)):
+            print_offset()
+            if len(topic[i]) > args.truncate_topic:
+                topic[i] = topic[i][:args.truncate_topic] + "…"
+            print(f'topic="{topic_colour}{topic[i]}{ansi_reset}"')
+    print_properties(args, mqtt)
+
+
+def print_unsuback(args, packet, mqtt):
+    """Print UNSUBACK packet"""
+    if "UNSUBACK" in args.suppress or "ACK" in args.suppress or (len(args.pick) > 0 and "UNSUBSCRIBE" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "B")
+    print(f" {ansi_magenta}UNSUBACK{ansi_reset}   ", end="")
+    print_mid(mqtt)
+    print("")
+    print_properties(args, mqtt)
+
+
+def print_pingreq(args, packet, mqtt):
+    """Print PINGREQ packet"""
+    if "PINGREQ" in args.suppress or "PING" in args.suppress or (len(args.pick) > 0 and "PING" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "C")
+    print(f" {ansi_br_black}PINGREQ{ansi_reset}", end="")
+    if int(mqtt['mqtt_mqtt_len']) == 0 and mqtt['mqtt_mqtt_hdrflags'] == "0xc0":
+        print("")
+    else:
+        print("     rl=%s %s" % (mqtt['mqtt_mqtt_len'], mqtt['mqtt_mqtt_hdrflags']))
+    print_properties(args, mqtt)
+
+
+def print_pingresp(args, packet, mqtt):
+    """Print PINGRESP packet"""
+    if "PINGRESP" in args.suppress or "PING" in args.suppress or (len(args.pick) > 0 and "PING" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "B")
+    print(f" {ansi_br_black}PINGRESP{ansi_reset}", end="")
+    if int(mqtt['mqtt_mqtt_len']) == 0 and mqtt['mqtt_mqtt_hdrflags'] == "0xd0":
+        print("")
+    else:
+        print("    rl=%s %s" % (mqtt['mqtt_mqtt_len'], mqtt['mqtt_mqtt_hdrflags']))
+    print_properties(args, mqtt)
+
+
+def print_disconnect(args, packet, mqtt):
+    """Print DISCONNECT packet"""
+    if "DISCONNECT" in args.suppress or (len(args.pick) > 0 and "DISCONNECT" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet)
+    print(f" {ansi_blue}DISCONNECT{ansi_reset} ", end="")
+    try:
+        reason_code = mqtt['mqtt_mqtt_disconnect_reason_code']
+        rc_str = reason_code_strings[reason_code]
+        print(f" rc={ansi_br_cyan}{reason_code}{ansi_reset} ({rc_str})")
+    except KeyError:
+        print("")
+    print_properties(args, mqtt)
+
+
+def print_auth(args, packet, mqtt):
+    """Print AUTH packet"""
+    if "AUTH" in args.suppress or (len(args.pick) > 0 and "AUTH" not in args.pick):
+        return
+
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet)
+    print(f" {ansi_br_magenta}AUTH{ansi_reset}        rl={mqtt['mqtt_mqtt_len']}")
+    print_properties(args, packet)
+
+
+# ============================================================
+# COMMAND ARGUMENT HANDLING
+# ============================================================
+
+
+class SuppressAction(argparse.Action):
+    def __init__(self, option_strings, dest="suppress", nargs=0, default=[], **kwargs):
+        super().__init__(option_strings, "suppress", nargs=0, default=[], **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        values = getattr(namespace, self.dest)
+        values.append(option_string[5:].upper())
+        setattr(namespace, self.dest, values)
+
+class PickAction(argparse.Action):
+    def __init__(self, option_strings, dest="pick", nargs=0, default=[], **kwargs):
+        super().__init__(option_strings, "pick", nargs=0, default=[], **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        values = getattr(namespace, self.dest)
+        values.append(option_string[7:].upper())
+        setattr(namespace, self.dest, values)
+
+def get_args():
+    parser = argparse.ArgumentParser(
+        prog="mqttshark",
+        description="Pretty print MQTT traffic from tshark",
+        epilog="https://github.com/ralight/mqttshark"
+    )
+    parser.add_argument(
+        '-i', '--interface', action='store',
+        help="network interface, defaults to the first non-loopback"
+    )
+    parser.add_argument(
+        '-p', '--port', action='store', default="1883",
+        help="comma separated list of network ports to observe, defaults to 1883"
+    )
+    parser.add_argument(
+        "-v", "--version", action="version",
+        version = f"{parser.prog} version 1.0.0"
+    )
+
+    output_modifier_group = parser.add_argument_group('Output modification', 'Change what information is displayed')
+    output_modifier_group_args = [
+        ('--no-properties', "don't display MQTT v5.0 properties")
+    ]
+    for opt,help in output_modifier_group_args:
+        output_modifier_group.add_argument(opt, action='store_true', help=help)
+
+    output_modifier_group.add_argument("--truncate-clientid", action="store", default=23, type=int,
+        help="Truncate clientids to this number of characters. Defaults to 23.")
+
+    output_modifier_group.add_argument("--truncate-payload", action="store", default=30, type=int,
+        help="Truncate payloads to this number of characters. Defaults to 30.")
+
+    output_modifier_group.add_argument("--truncate-topic", action="store", default=30, type=int,
+        help="Truncate topics to this number of characters. Defaults to 30.")
+
+    pick_type_group = parser.add_argument_group('Pick command', "Display messages only from the picked groups. Multiple groups may be used.")
+    pick_type_args = [
+        ("--pick-connect", "display MQTT CONNECT/CONNACK"),
+        ("--pick-publish", "display MQTT PUBLISH/PUBACK/PUBREC/PUBREL/PUBCOMP"),
+        ("--pick-subscribe", "display MQTT SUBSCRIBE/SUBACK"),
+        ("--pick-unsubscribe", "display MQTT UNSUBSCRIBE/UNSUBACK"),
+        ("--pick-ping", "display MQTT PINGREQ/PINGRESP"),
+        ("--pick-disconnect", "display MQTT DISCONNECT"),
+        ("--pick-auth", "display MQTT AUTH"),
+        ("--pick-reserved", "display MQTT RESERVED"),
+    ]
+    for opt,help in pick_type_args:
+        pick_type_group.add_argument(opt, action=PickAction, help=help)
+
+    suppression_group = parser.add_argument_group('Packet suppression', "Don't display certain packets")
+    suppression_group_args = [
+        ('--no-connect', "don't display MQTT CONNECT"),
+        ('--no-connack', "don't display MQTT CONNACK"),
+        ('--no-publish', "don't display MQTT PUBLISH"),
+        ('--no-puback', "don't display MQTT PUBACK"),
+        ('--no-pubrec', "don't display MQTT PUBREC"),
+        ('--no-pubrel', "don't display MQTT PUBREL"),
+        ('--no-pubcomp', "don't display MQTT PUBCOMP"),
+        ('--no-subscribe', "don't display MQTT SUBSCRIBE"),
+        ('--no-suback', "don't display MQTT SUBACK"),
+        ('--no-unsubscribe', "don't display MQTT UNSUBSCRIBE"),
+        ('--no-unsuback', "don't display MQTT UNSUBACK"),
+        ('--no-pingreq', "don't display MQTT PINGREQ"),
+        ('--no-pingresp', "don't display MQTT PINGRESP"),
+        ('--no-disconnect', "don't display MQTT DISCONNECT"),
+        ('--no-auth', "don't display MQTT AUTH"),
+        ('--no-reserved', "don't display MQTT RESERVED"),
+        ('--no-ack', "don't display MQTT acknowledge packets (CONNACK, PUBACK, PUBREC, PUBREL, PUBCOMP, SUBACK, UNSUBACK)"),
+        ('--no-qos-flow', "don't display MQTT PUBLISH acknowledge packets (PUBACK, PUBREC, PUBREL, PUBCOMP)"),
+        ('--no-ping', "don't display MQTT PINGREQ/PINGRESP")
+    ]
+    for opt,help in suppression_group_args:
+        suppression_group.add_argument(opt, action=SuppressAction, help=help)
+
+    return parser.parse_args()
+
+# ============================================================
+# MAIN FUNCTIONS
+# ============================================================
+
+def process_packets(tshark, args):
+    while True:
+        line = tshark.stdout.readline()
+
+        packet = json.loads(line)
+        try:
+            mqttlist = packet['layers']['mqtt']
+        except KeyError:
+            continue
+
+        if not isinstance(mqttlist, list):
+            mqttlist = [mqttlist]
+
+        for mqtt in mqttlist:
+            try:
+                hdr = int(mqtt['mqtt_mqtt_hdrflags'], 16)
+                cmd = hdr & 0xF0
+            except KeyError:
+                print_malformed(args, packet, mqtt)
+                continue
+
+            if cmd == 0x00:
+                print_reserved(args, packet, mqtt)
+            elif cmd == 0x10:
+                set_client_mapping(packet)
+                print_connect(args, packet, mqtt)
+            elif cmd == 0x20:
+                print_connack(args, packet, mqtt)
+            elif cmd == 0x30:
+                print_publish(args, packet, mqtt)
+            elif cmd == 0x40:
+                if "PUBACK" not in args.suppress:
+                    print_simple(args, "PUBACK ", ansi_br_green, packet, mqtt)
+            elif cmd == 0x50:
+                if "PUBREC" not in args.suppress:
+                    print_simple(args, "PUBREC ", ansi_cyan, packet, mqtt)
+            elif cmd == 0x60:
+                if "PUBREL" not in args.suppress:
+                    print_simple(args, "PUBREL ", ansi_cyan, packet, mqtt)
+            elif cmd == 0x70:
+                if "PUBCOMP" not in args.suppress:
+                    print_simple(args, "PUBCOMP", ansi_cyan, packet, mqtt)
+            elif cmd == 0x80:
+                print_subscribe(args, packet, mqtt)
+            elif cmd == 0x90:
+                print_suback(args, packet, mqtt)
+            elif cmd == 0xA0:
+                print_unsubscribe(args, packet, mqtt)
+            elif cmd == 0xB0:
+                print_unsuback(args, packet, mqtt)
+            elif cmd == 0xC0:
+                print_pingreq(args, packet, mqtt)
+            elif cmd == 0xD0:
+                print_pingresp(args, packet, mqtt)
+            elif cmd == 0xE0:
+                print_disconnect(args, packet, mqtt)
+            elif cmd == 0xF0:
+                print_auth(args, packet, mqtt)
+
+
+def main():
+    args = get_args()
+
+    cmd = ["tshark", "-T", "ek", "-q"]
+    if args.interface is not None:
+        cmd += ["-i", args.interface]
+
+    ports = args.port.split(",")
+    p = f"tcp port {ports[0]}"
+    for i in range(1, len(ports)):
+        p += f" or tcp port {ports[i]}"
+    cmd += ["-f", p]
+
+    for port in ports:
+        cmd += ["-d", f"tcp.port=={port},mqtt"]
+
+    tshark = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process_packets(tshark, args)
+
+main()

@@ -836,6 +836,8 @@ def get_args():
 def process_packets(tshark, args):
     while True:
         line = tshark.stdout.readline()
+        if tshark.returncode is not None:
+            sys.exit(tshark.returncode)
 
         packet = json.loads(line)
         try:

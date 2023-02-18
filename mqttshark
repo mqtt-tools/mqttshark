@@ -771,6 +771,10 @@ def get_args():
         "--tls-keylog", action="store", type=str, default=None,
         help="path to TLS key log file, for packet decryption. Applies to all ports"
     )
+    parser.add_argument(
+        "--default-version", action="store", type=int, default=None,
+        help="default MQTT protocol version to use, if CONNECT not see. 3, 4, or 5"
+    )
 
     output_modifier_group = parser.add_argument_group('Output modification', 'Change what information is displayed')
     output_modifier_group_args = [
@@ -916,6 +920,17 @@ def main():
 
     for port in ports:
         cmd += ["-d", f"tcp.port=={port},{decode_proto}"]
+
+    if args.default_version is not None:
+        if args.default_version == 3:
+            ver = "MQTT v3.1"
+        elif args.default_version == 4:
+            ver = "MQTT v3.1.1"
+        elif args.default_version == 5:
+            ver = "MQTT v5.0"
+        else:
+            raise ValueError("--default-version must be 3, 4, or 5")
+        cmd += ['-o', f'mqtt.default_version:{ver}']
 
     tshark = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     process_packets(tshark, args)

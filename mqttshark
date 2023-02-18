@@ -403,7 +403,12 @@ def print_connect(args, packet, mqtt):
     if "CONNECT" in args.suppress or (len(args.pick) > 0 and "CONNECT" not in args.pick):
         return
 
-    protoname = mqtt['mqtt_mqtt_protoname']
+    try:
+        protoname = mqtt['mqtt_mqtt_protoname']
+    except KeyError:
+        print_malformed(args, packet, mqtt)
+        return
+
     protover = mqtt['mqtt_mqtt_ver']
     try:
         username = mqtt['mqtt_mqtt_username']

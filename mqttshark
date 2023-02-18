@@ -767,6 +767,10 @@ def get_args():
         "-v", "--version", action="version",
         version = f"{parser.prog} version 0.0.1"
     )
+    parser.add_argument(
+        "--tls-keylog", action="store", type=str, default=None,
+        help="path to TLS key log file, for packet decryption"
+    )
 
     output_modifier_group = parser.add_argument_group('Output modification', 'Change what information is displayed')
     output_modifier_group_args = [
@@ -902,8 +906,14 @@ def main():
         p += f" or tcp port {ports[i]}"
     cmd += ["-f", p]
 
+    if args.tls_keylog is not None:
+        cmd += ['-o', f'tls.keylog_file:{args.tls_keylog}']
+        decode_proto = "tls"
+    else:
+        decode_proto = "mqtt"
+
     for port in ports:
-        cmd += ["-d", f"tcp.port=={port},mqtt"]
+        cmd += ["-d", f"tcp.port=={port},{decode_proto}"]
 
     tshark = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     process_packets(tshark, args)

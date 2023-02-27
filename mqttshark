@@ -130,6 +130,36 @@ origin_c = f"{ansi_magenta}C{ansi_reset}"
 errstr = f"{ansi_error}?{ansi_reset}"
 
 # ============================================================
+# OUTPUT COLOURS
+# ============================================================
+topic_colour = ansi_br_yellow
+payload_colour = ansi_br_blue
+property_colour = ansi_br_blue
+clientid_colour = ansi_br_cyan
+keepalive_colour = ansi_br_cyan
+cleansession_colour = ansi_br_cyan
+protover_colour = ansi_br_cyan
+rc_colour = ansi_br_cyan
+mid_colour = ansi_br_cyan
+qos_colour = ansi_br_cyan
+username_colour = ansi_br_cyan
+password_colour = ansi_br_cyan
+retain_colour = ansi_br_cyan
+sub_opt_colour = ansi_br_cyan
+rc_colour = ansi_br_cyan
+
+CONNECT_colour = ansi_yellow
+WILL_colour = ansi_br_blue
+PUBLISH0_colour = ansi_green
+PUBLISH1_colour = ansi_br_green
+PUBLISH2_colour = ansi_cyan
+SUBSCRIBE_colour = ansi_br_yellow
+UNSUBSCRIBE_colour = ansi_magenta
+PING_colour = ansi_br_black
+DISCONNECT_colour = ansi_blue
+AUTH_colour = ansi_br_magenta
+
+# ============================================================
 # GLOBAL VARS
 # ============================================================
 
@@ -259,9 +289,9 @@ def print_properties(args, mqtt):
                 except AttributeError:
                     value = errstr
             if key is None:
-                print(f"{name} {ansi_br_blue}{value}{ansi_reset}")
+                print(f"{name} {property_colour}{value}{ansi_reset}")
             else:
-                print(f"{name} {ansi_br_blue}{key}{ansi_reset}={ansi_br_blue}{value}{ansi_reset}")
+                print(f"{name} {property_colour}{key}{ansi_reset}={property_colour}{value}{ansi_reset}")
         except KeyError:
             print(f"{errstr} %s" % prop_id)
 
@@ -272,7 +302,7 @@ def print_mid(mqtt):
     except KeyError:
         mid = errstr
 
-    print(f"mid={ansi_br_cyan}{mid}{ansi_reset}  ", end="")
+    print(f"mid={mid_colour}{mid}{ansi_reset}  ", end="")
 
 
 def print_pub_reason_code(mqtt, name):
@@ -282,7 +312,7 @@ def print_pub_reason_code(mqtt, name):
             rc_str = reason_code_strings[rc]
         except KeyError:
             rc_str = "?????"
-        print(f"rc={ansi_br_cyan}{rc}{ansi_reset} ({rc_str}) ", end="")
+        print(f"rc={rc_colour}{rc}{ansi_reset} ({rc_str}) ", end="")
     except KeyError:
         pass
 
@@ -406,10 +436,10 @@ def print_will(args, mqtt):
         payload = errstr
 
     print(" "*(len(timestr)+1+5+2+5+1+2), end="")
-    print(f"{ansi_br_blue}WILL{ansi_reset}        ", end="")
-    print(f"qos={ansi_br_cyan}{qos}{ansi_reset}", end="")
-    print(f'  topic="{ansi_br_yellow}{topic}{ansi_reset}"', end="")
-    print(f'  payload="{ansi_br_blue}{payload}{ansi_reset}"', end="")
+    print(f"{WILL_colour}WILL{ansi_reset}        ", end="")
+    print(f"qos={qos_colour}{qos}{ansi_reset}", end="")
+    print(f'  topic="{topic_colour}{topic}{ansi_reset}"', end="")
+    print(f'  payload="{payload_colour}{payload}{ansi_reset}"', end="")
     print("")
     #print(mqtt['mqtt_mqtt_will_properties'])
 
@@ -460,16 +490,16 @@ def print_connect(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "C")
-    print(f' {ansi_yellow}CONNECT{ansi_reset}     ', end="")
-    print(f'clientid="{ansi_br_cyan}{clientid}{ansi_reset}"  ', end="")
-    print(f'keepalive={ansi_br_cyan}{keepalive}{ansi_reset}  ', end="")
-    print(f'cleansession={ansi_br_cyan}{cleansession}{ansi_reset}  ', end="")
-    print(f'protover={ansi_br_cyan}{protover}{ansi_reset}')
+    print(f' {CONNECT_colour}CONNECT{ansi_reset}     ', end="")
+    print(f'clientid="{clientid_colour}{clientid}{ansi_reset}"  ', end="")
+    print(f'keepalive={keepalive_colour}{keepalive}{ansi_reset}  ', end="")
+    print(f'cleansession={cleansession_colour}{cleansession}{ansi_reset}  ', end="")
+    print(f'protover={protover_colour}{protover}{ansi_reset}')
 
     if username != "" or password != "":
         print_offset()
-        print(f'username="{ansi_br_cyan}{username}{ansi_reset}" ', end="")
-        print(f'password="{ansi_br_cyan}{password}{ansi_reset}"')
+        print(f'username="{username_colour}{username}{ansi_reset}" ', end="")
+        print(f'password="{password_colour}{password}{ansi_reset}"')
     print_properties(args, mqtt)
     print_will(args, mqtt)
 
@@ -492,8 +522,8 @@ def print_connack(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "B")
-    print(f" {ansi_yellow}CONNACK{ansi_reset}", end="")
-    print(f"     rc={ansi_br_cyan}{rc}{ansi_reset} ({rc_str})")
+    print(f" {CONNECT_colour}CONNACK{ansi_reset}", end="")
+    print(f"     rc={rc_colour}{rc}{ansi_reset} ({rc_str})")
     print_properties(args, mqtt)
 
 
@@ -512,11 +542,11 @@ def print_publish(args, packet, mqtt):
     try:
         qos = mqtt['mqtt_mqtt_qos']
         if qos == "0":
-            publish_colour = ansi_green
+            publish_colour = PUBLISH0_colour
         elif qos == "1":
-            publish_colour = ansi_br_green
+            publish_colour = PUBLISH1_colour
         elif qos == "2":
-            publish_colour = ansi_cyan
+            publish_colour = PUBLISH2_colour
         else:
             publish_colour = ansi_error
     except KeyError:
@@ -536,7 +566,7 @@ def print_publish(args, packet, mqtt):
             retain = "0"
     except KeyError:
         retain = errstr
-    print(f"retain={ansi_br_cyan}{retain}{ansi_reset}", end="")
+    print(f"retain={retain_colour}{retain}{ansi_reset}", end="")
 
     try:
         topic = mqtt["mqtt_mqtt_topic"]
@@ -545,8 +575,8 @@ def print_publish(args, packet, mqtt):
     except KeyError:
         topic = errstr
 
-    print(f'  topic="{ansi_br_yellow}{topic}{ansi_reset}"', end="")
-    print(f'  payload="{ansi_br_blue}{payload}{ansi_reset}"')
+    print(f'  topic="{topic_colour}{topic}{ansi_reset}"', end="")
+    print(f'  payload="{payload_colour}{payload}{ansi_reset}"')
     print_properties(args, mqtt)
 
 
@@ -579,21 +609,21 @@ def print_sub_options(options_str):
     reserved = (options & 0xC0)
 
     if qos == 3:
-        qos_colour = ansi_error
+        colour = ansi_error
     else:
-        qos_colour = ansi_br_cyan
-    print(f'qos={qos_colour}{qos}{ansi_reset}', end="")
+        colour = qos_colour
+    print(f'qos={colour}{qos}{ansi_reset}', end="")
 
     if no_local:
-        print(f'  {ansi_br_cyan}no-local{ansi_reset}', end="")
+        print(f'  {sub_opt_colour}no-local{ansi_reset}', end="")
     if retain_as_published:
-        print(f'  {ansi_br_cyan}retain-as-published{ansi_reset}', end="")
+        print(f'  {sub_opt_colour}retain-as-published{ansi_reset}', end="")
     if retain_handling == 1:
-        print(f'  retain-handling={ansi_br_cyan}new{ansi_reset}', end="")
+        print(f'  retain-handling={sub_opt_colour}new{ansi_reset}', end="")
     elif retain_handling == 2:
-        print(f'  retain-handling={ansi_br_cyan}never{ansi_reset}', end="")
+        print(f'  retain-handling={sub_opt_colour}never{ansi_reset}', end="")
     elif retain_handling == 3:
-        print(f'  retain-handling={ansi_error}error{ansi_reset}', end="")
+        print(f'  retain-handling={sub_opt_colour}error{ansi_reset}', end="")
     if reserved:
         print(f'  reserved={ansi_error}{reserved}{ansi_reset}', end="")
 
@@ -619,7 +649,7 @@ def print_subscribe(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "C")
-    print(f" {ansi_br_yellow}SUBSCRIBE{ansi_reset}   ", end="")
+    print(f" {SUBSCRIBE_colour}SUBSCRIBE{ansi_reset}   ", end="")
     print_mid(mqtt)
 
     if not isinstance(topic, list):
@@ -629,7 +659,7 @@ def print_subscribe(args, packet, mqtt):
             print_sub_options(qos)
         else:
             print_sub_options(errstr)
-        print(f'  topic="{ansi_br_yellow}{topic}{ansi_reset}"')
+        print(f'  topic="{topic_colour}{topic}{ansi_reset}"')
     else:
         print("")
         for i in range(0, len(topic)):
@@ -638,7 +668,7 @@ def print_subscribe(args, packet, mqtt):
                 topic[i] = topic[i][:args.truncate_topic] + "…"
             print("...")
             print_sub_options(qos[i])
-            print(f'  topic="{ansi_br_yellow}{topic[i]}{ansi_reset}"')
+            print(f'  topic="{topic_colour}{topic[i]}{ansi_reset}"')
     print_properties(args, mqtt)
 
 
@@ -650,7 +680,7 @@ def print_suback(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "B")
-    print(f" {ansi_br_yellow}SUBACK{ansi_reset}      ", end="")
+    print(f" {SUBSCRIBE_colour}SUBACK{ansi_reset}      ", end="")
     print_mid(mqtt)
     try:
         reason_code = mqtt['mqtt_mqtt_suback_reason_code']
@@ -663,7 +693,7 @@ def print_suback(args, packet, mqtt):
     if not isinstance(reason_code, list):
         reason_code = [reason_code]
     if len(reason_code) > 0:
-        print(f"rc={ansi_br_cyan}{reason_code[0]}{ansi_reset}", end="")
+        print(f"rc={rc_colour}{reason_code[0]}{ansi_reset}", end="")
         if reason_code[0] == errstr or int(reason_code[0]) > 2:
             try:
                 rc_str = reason_code_strings[reason_code[0]]
@@ -673,7 +703,7 @@ def print_suback(args, packet, mqtt):
 
         reason_code.pop(0)
         for rc in reason_code:
-            print(f", {ansi_br_cyan}{rc}{ansi_reset}", end="")
+            print(f", {rc_colour}{rc}{ansi_reset}", end="")
             if rc == errstr or int(rc) > 2:
                 try:
                     rc_str = reason_code_strings[rc]
@@ -694,7 +724,7 @@ def print_unsubscribe(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "C")
-    print(f" {ansi_magenta}UNSUBSCRIBE{ansi_reset} ", end="")
+    print(f" {UNSUBSCRIBE_colour}UNSUBSCRIBE{ansi_reset} ", end="")
     print_mid(mqtt)
     try:
         topic = mqtt['mqtt_mqtt_topic']
@@ -704,14 +734,14 @@ def print_unsubscribe(args, packet, mqtt):
     if not isinstance(topic, list):
         if len(topic) > args.truncate_topic:
             topic = topic[:args.truncate_topic] + "…"
-        print(f'topic="{ansi_br_yellow}{topic}{ansi_reset}"')
+        print(f'topic="{topic_colour}{topic}{ansi_reset}"')
     else:
         topic = [topic]
         for i in range(0, len(topic)):
             print_offset()
             if len(topic[i]) > args.truncate_topic:
                 topic[i] = topic[i][:args.truncate_topic] + "…"
-            print(f'topic="{ansi_br_yellow}{topic[i]}{ansi_reset}"')
+            print(f'topic="{topic_colour}{topic[i]}{ansi_reset}"')
     print_properties(args, mqtt)
 
 
@@ -723,7 +753,7 @@ def print_unsuback(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "B")
-    print(f" {ansi_magenta}UNSUBACK{ansi_reset}    ", end="")
+    print(f" {UNSUBSCRIBE_colour}UNSUBACK{ansi_reset}    ", end="")
     print_mid(mqtt)
 
     try:
@@ -731,14 +761,14 @@ def print_unsuback(args, packet, mqtt):
         if not isinstance(reason_code, list):
             reason_code = [reason_code]
         if len(reason_code) > 0:
-            print(f"rc={ansi_br_cyan}{reason_code[0]}{ansi_reset}", end="")
+            print(f"rc={rc_colour}{reason_code[0]}{ansi_reset}", end="")
             if reason_code[0] == errstr or int(reason_code[0]) != 0:
                 rc_str = reason_code_strings[reason_code[0]]
                 print(f" ({rc_str})", end="")
 
             reason_code.pop(0)
             for rc in reason_code:
-                print(f",{ansi_br_cyan}{rc}{ansi_reset}", end="")
+                print(f",{rc_colour}{rc}{ansi_reset}", end="")
                 if rc == errstr or int(rc) != 0:
                     rc_str = reason_code_strings[rc]
                     print(f" ({rc_str})", end="")
@@ -760,7 +790,7 @@ def print_pingreq(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "C")
-    print(f" {ansi_br_black}PINGREQ{ansi_reset}", end="")
+    print(f" {PING_colour}PINGREQ{ansi_reset}", end="")
     if int(mqtt['mqtt_mqtt_len']) == 0 and mqtt['mqtt_mqtt_hdrflags'] == "0xc0":
         print("")
     else:
@@ -776,7 +806,7 @@ def print_pingresp(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet, "B")
-    print(f" {ansi_br_black}PINGRESP{ansi_reset}", end="")
+    print(f" {PING_colour}PINGRESP{ansi_reset}", end="")
     if int(mqtt['mqtt_mqtt_len']) == 0 and mqtt['mqtt_mqtt_hdrflags'] == "0xd0":
         print("")
     else:
@@ -792,11 +822,11 @@ def print_disconnect(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet)
-    print(f" {ansi_blue}DISCONNECT{ansi_reset} ", end="")
+    print(f" {DISCONNECT_colour}DISCONNECT{ansi_reset} ", end="")
     try:
         reason_code = mqtt['mqtt_mqtt_disconnect_reason_code']
         rc_str = reason_code_strings[reason_code]
-        print(f" rc={ansi_br_cyan}{reason_code}{ansi_reset} ({rc_str})")
+        print(f" rc={rc_colour}{reason_code}{ansi_reset} ({rc_str})")
     except KeyError:
         print("")
     print_properties(args, mqtt)
@@ -810,7 +840,7 @@ def print_auth(args, packet, mqtt):
     print_timestamp(packet)
     print_session_ports(packet)
     print_origin(packet)
-    print(f" {ansi_br_magenta}AUTH{ansi_reset}        rl={mqtt['mqtt_mqtt_len']}")
+    print(f" {AUTH_colour}AUTH{ansi_reset}        rl={mqtt['mqtt_mqtt_len']}")
     print_properties(args, packet)
 
 

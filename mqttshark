@@ -338,7 +338,7 @@ def check_client_mapping(packet):
         c = client_mapping[src]
         return c
     except KeyError:
-        return errstr
+        return "?"
 
 
 def print_origin(packet, expected=None):

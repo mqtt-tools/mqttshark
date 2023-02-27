@@ -127,6 +127,7 @@ all_props = {
 
 origin_b = f"{ansi_green}B{ansi_reset}"
 origin_c = f"{ansi_magenta}C{ansi_reset}"
+errstr = f"{ansi_error}?{ansi_reset}"
 
 # ============================================================
 # GLOBAL VARS
@@ -137,6 +138,9 @@ all_colours = [31, 32, 33, 34, 35, 36, 37, 90, 91, 92, 93, 94, 95, 96, 97]
 
 # Mapping variable to keep track of whether a src port is a client/broker
 client_mapping = {}
+
+# Mapping variable to keep track of what MQTT version a client is using
+client_versions = {}
 
 # Mapping variable to keep consistent colours for sessions
 session_ports = {}
@@ -262,7 +266,7 @@ def print_properties(args, mqtt):
             if key is None:
                 print(f"{name} {colour}{value}{ansi_reset}")
             else:
-                print(f"{name} {colour}{key}={value}{ansi_reset}")
+                print(f"{name} {colour}{key}{ansi_reset}={colour}{value}{ansi_reset}")
         except KeyError:
             print("? %s" % prop_id)
 
@@ -276,6 +280,18 @@ def print_mid(mqtt):
         mid_colour = ansi_error
 
     print(f"mid={mid_colour}{mid}{ansi_reset}  ", end="")
+
+
+def print_pub_reason_code(mqtt, name):
+    try:
+        rc = mqtt[f'mqtt_mqtt_{name.strip().lower()}_reason_code']
+        try:
+            rc_str = reason_code_strings[rc]
+        except KeyError:
+            rc_str = "?????"
+        print(f"rc={ansi_br_cyan}{rc}{ansi_reset} ({rc_str}) ", end="")
+    except KeyError:
+        pass
 
 
 def print_session_ports(packet):
@@ -309,6 +325,19 @@ def set_client_mapping(packet):
     except KeyError:
         client_mapping[dst] = "B"
 
+
+def set_client_version(packet, ver):
+    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
+    dst = "%s:%s" % (packet['layers']['ip']['ip_ip_dst'], packet['layers']['tcp']['tcp_tcp_dstport'])
+    client_versions[src] = ver
+    client_versions[dst] = ver
+
+def get_client_version(packet):
+    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
+    try:
+        return client_versions[src]
+    except KeyError:
+        return 4
 
 def check_client_mapping(packet):
     src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
@@ -359,7 +388,7 @@ def print_will(args, mqtt):
     global timestr
     try:
         flag = mqtt['mqtt_mqtt_conflag_willflag']
-    except KeyValue:
+    except KeyError:
         return
     if flag == False:
         return
@@ -409,7 +438,13 @@ def print_connect(args, packet, mqtt):
         print_malformed(args, packet, mqtt)
         return
 
-    protover = mqtt['mqtt_mqtt_ver']
+    try:
+        protover = mqtt['mqtt_mqtt_ver']
+    except KeyError:
+        print_malformed(args, packet, mqtt)
+        return
+    set_client_version(packet, int(protover))
+
     try:
         username = mqtt['mqtt_mqtt_username']
     except KeyError:
@@ -495,14 +530,18 @@ def print_publish(args, packet, mqtt):
         payload = "?"
         payload_colour = ansi_error
 
-    qos = mqtt['mqtt_mqtt_qos']
-    if qos == "0":
-        col = ansi_green
-    elif qos == "1":
-        col = ansi_br_green
-    elif qos == "2":
-        col = ansi_cyan
-    else:
+    try:
+        qos = mqtt['mqtt_mqtt_qos']
+        if qos == "0":
+            col = ansi_green
+        elif qos == "1":
+            col = ansi_br_green
+        elif qos == "2":
+            col = ansi_cyan
+        else:
+            col = ansi_red
+    except KeyError:
+        qos = "?"
         col = ansi_red
 
     print_timestamp(packet)
@@ -512,10 +551,16 @@ def print_publish(args, packet, mqtt):
     if qos != "0":
         print_mid(mqtt)
 
-    if mqtt['mqtt_mqtt_retain']:
-        print(f"retain={ansi_br_cyan}1{ansi_reset}", end="")
-    else:
-        print(f"retain={ansi_br_cyan}0{ansi_reset}", end="")
+    try:
+        retain_colour = ansi_br_cyan
+        if mqtt['mqtt_mqtt_retain']:
+            retain = "1"
+        else:
+            retain = "0"
+    except KeyError:
+        retain = "?"
+        retain_colour = ansi_red
+    print(f"retain={retain_colour}{retain}{ansi_reset}", end="")
 
     try:
         topic = mqtt["mqtt_mqtt_topic"]
@@ -541,8 +586,38 @@ def print_simple(args, name, colour, packet, mqtt):
     print_origin(packet)
     print(f" {colour}{name}{ansi_reset}     ", end="")
     print_mid(mqtt)
+    print_pub_reason_code(mqtt, name)
     print("")
     print_properties(args, mqtt)
+
+
+def print_sub_options(options_str):
+    options = int(options_str, 16)
+    qos = options & 0x03
+
+    no_local = options & 0x04
+    retain_as_published = options & 0x08
+    retain_handling = (options & 0x30) >> 4
+    reserved = (options & 0xC0)
+
+    if qos == 3:
+        qos_colour = ansi_error
+    else:
+        qos_colour = ansi_br_cyan
+    print(f'qos={qos_colour}{qos}{ansi_reset}', end="")
+
+    if no_local:
+        print(f'  {ansi_br_cyan}no-local{ansi_reset}', end="")
+    if retain_as_published:
+        print(f'  {ansi_br_cyan}retain-as-published{ansi_reset}', end="")
+    if retain_handling == 1:
+        print(f'  retain-handling{ansi_reset}={ansi_br_cyan}new{ansi_reset}', end="")
+    elif retain_handling == 2:
+        print(f'  retain-handling{ansi_reset}={ansi_br_cyan}never{ansi_reset}', end="")
+    elif retain_handling == 3:
+        print(f'  retain-handling{ansi_reset}={ansi_error}error{ansi_reset}', end="")
+    if reserved:
+        print(f'  reserved={ansi_error}{reserved}{ansi_reset}', end="")
 
 
 def print_subscribe(args, packet, mqtt):
@@ -559,7 +634,7 @@ def print_subscribe(args, packet, mqtt):
 
     qos_colour = ansi_br_cyan
     try:
-        qos = mqtt['mqtt_mqtt_subscription_options_qos']
+        qos = mqtt['mqtt_mqtt_subscription_options']
     except KeyError:
         try:
             qos = mqtt['mqtt_mqtt_sub_qos']
@@ -576,7 +651,7 @@ def print_subscribe(args, packet, mqtt):
     if not isinstance(topic, list):
         if len(topic) > args.truncate_topic:
             topic = topic[:args.truncate_topic] + "…"
-        print(f'qos={qos_colour}{qos}{ansi_reset}', end="")
+        print_sub_options(qos)
         print(f'  topic="{topic_colour}{topic}{ansi_reset}"')
     else:
         print("")
@@ -584,7 +659,7 @@ def print_subscribe(args, packet, mqtt):
             print_offset()
             if len(topic[i]) > args.truncate_topic:
                 topic[i] = topic[i][:args.truncate_topic] + "…"
-            print(f'qos={qos_colour}{qos[i]}{ansi_reset}', end="")
+            print_sub_options(qos[i])
             print(f'  topic="{topic_colour}{topic[i]}{ansi_reset}"')
     print_properties(args, mqtt)
 
@@ -611,11 +686,27 @@ def print_suback(args, packet, mqtt):
 
     if not isinstance(reason_code, list):
         reason_code = [reason_code]
-    print(f"rc={rc_colour}{reason_code[0]}{ansi_reset}", end="")
-    reason_code.pop(0)
-    for rc in reason_code:
-        print(f",{rc_colour}{rc}{ansi_reset}", end="")
-    print("")
+    if len(reason_code) > 0:
+        print(f"rc={rc_colour}{reason_code[0]}{ansi_reset}", end="")
+        if reason_code[0] == errstr or int(reason_code[0]) > 2:
+            try:
+                rc_str = reason_code_strings[reason_code[0]]
+            except KeyError:
+                rc_str = errstr
+            print(f" ({rc_str})", end="")
+
+        reason_code.pop(0)
+        for rc in reason_code:
+            print(f", {rc_colour}{rc}{ansi_reset}", end="")
+            if rc == errstr or int(rc) > 2:
+                try:
+                    rc_str = reason_code_strings[rc]
+                except KeyError:
+                    rc_str = errstr
+                print(f" ({rc_str})", end="")
+        print("")
+    else:
+        print(f"rc={errstr}")
     print_properties(args, mqtt)
 
 
@@ -660,7 +751,30 @@ def print_unsuback(args, packet, mqtt):
     print_origin(packet, "B")
     print(f" {ansi_magenta}UNSUBACK{ansi_reset}    ", end="")
     print_mid(mqtt)
+
+    try:
+        reason_code = mqtt['mqtt_mqtt_suback_qos']
+        if not isinstance(reason_code, list):
+            reason_code = [reason_code]
+        if len(reason_code) > 0:
+            print(f"rc={ansi_br_cyan}{reason_code[0]}{ansi_reset}", end="")
+            if reason_code[0] == errstr or int(reason_code[0]) != 0:
+                rc_str = reason_code_strings[reason_code[0]]
+                print(f" ({rc_str})", end="")
+
+            reason_code.pop(0)
+            for rc in reason_code:
+                print(f",{ansi_br_cyan}{rc}{ansi_reset}", end="")
+                if rc == errstr or int(rc) != 0:
+                    rc_str = reason_code_strings[rc]
+                    print(f" ({rc_str})", end="")
+        else:
+            print(f"rc={errstr}", end="")
+    except KeyError:
+        pass
     print("")
+
+
     print_properties(args, mqtt)
 
 
@@ -761,7 +875,9 @@ def get_args():
     )
     parser.add_argument(
         '-p', '--port', action='store', default="1883",
-        help="comma separated list of network ports to observe, defaults to 1883"
+        help="comma separated list of network ports to observe, defaults to 1883. " \
+                +"It is possible to choose which protocol to decode by using e.g. '-p 1883:mqtt,8883:mqtts," \
+                +"8080:ws,8081:wss'"
     )
     parser.add_argument(
         "-v", "--version", action="version",
@@ -769,11 +885,11 @@ def get_args():
     )
     parser.add_argument(
         "--tls-keylog", action="store", type=str, default=None,
-        help="path to TLS key log file, for packet decryption. Applies to all ports"
+        help="path to TLS key log file, for packet decryption. Applies to all TLS ports"
     )
     parser.add_argument(
         "--default-version", action="store", type=int, default=None,
-        help="default MQTT protocol version to use, if CONNECT not see. 3, 4, or 5"
+        help="default MQTT protocol version to use, if CONNECT not seen. 3, 4, or 5"
     )
 
     output_modifier_group = parser.add_argument_group('Output modification', 'Change what information is displayed')
@@ -834,6 +950,443 @@ def get_args():
     return parser.parse_args()
 
 # ============================================================
+# WEBSOCKETS PARSING FUNCTIONS
+# ============================================================
+
+# -----------------
+# Datatypes
+# -----------------
+def ws_parse_varint(packet, rl, ws_data):
+    mult = 1
+    varint = 0
+    while True:
+        rl, b = ws_parse_byte(packet, rl, ws_data)
+        if b == errstr:
+            return 0, errstr
+        varint += (b & 127) * mult
+        mult *= 128
+        if b & 128 == 0:
+            return rl, varint
+    return rl, varint
+
+
+def ws_parse_uint32(packet, rl, ws_data):
+    try:
+        d = int(ws_data.pop(0) + ws_data.pop(0) + ws_data.pop(0) + ws_data.pop(0), 16)
+        return rl-4, d
+    except IndexError:
+        set_malformed(packet)
+        return 0, errstr
+
+def ws_parse_uint16(packet, rl, ws_data):
+    try:
+        d = int(ws_data.pop(0) + ws_data.pop(0), 16)
+        return rl-2, d
+    except IndexError:
+        set_malformed(packet)
+        return 0, errstr
+
+def ws_parse_byte(packet, rl, ws_data):
+    try:
+        d = int(ws_data.pop(0), 16)
+        return rl-1, d
+    except IndexError:
+        set_malformed(packet)
+        return 0, errstr
+
+
+def ws_parse_string(packet, rl, ws_data):
+    s = ""
+    try:
+        rl, d = ws_parse_uint16(packet, rl, ws_data)
+        if d == errstr:
+            return 0, s+errstr
+        for i in range(0, d):
+            s += chr(int(ws_data.pop(0), 16))
+        return rl-d, s
+    except IndexError:
+        set_malformed(packet)
+        return 0, s+errstr
+
+
+def ws_parse_binary(packet, rl, ws_data):
+    s = ""
+    try:
+        rl, d = ws_parse_uint16(packet, rl, ws_data)
+        if d == errstr:
+            return 0, s+errstr
+        for i in range(0, d):
+            s += ws_data.pop(0)
+        return rl-d, s
+    except IndexError:
+        set_malformed(packet)
+        return 0, s+errstr
+
+
+def ws_property_add(mqtt, key, value):
+    try:
+        mqtt[key].append(value)
+    except KeyError:
+        mqtt[key] = [value]
+
+def ws_property_add_id(mqtt, value):
+    value = f"0x{value:02x}"
+    ws_property_add(mqtt, 'mqtt_mqtt_property_id', value)
+
+def ws_property_add_number(mqtt, value):
+    ws_property_add(mqtt, 'mqtt_mqtt_prop_number', value)
+
+def ws_property_add_string(mqtt, value):
+    ws_property_add(mqtt, 'mqtt_mqtt_prop_string', value)
+
+def ws_property_add_string_pair(mqtt, key, value):
+    ws_property_add(mqtt, 'mqtt_mqtt_prop_key', key)
+    ws_property_add(mqtt, 'mqtt_mqtt_prop_value', value)
+
+
+def ws_parse_properties(packet, mqtt, rl, ws_data):
+    rl, proplen = ws_parse_varint(packet, rl, ws_data)
+    if proplen == errstr:
+        return 0
+    i = 0
+    while i < proplen:
+        readlen, propid = ws_parse_varint(packet, 0, ws_data)
+        if propid == errstr:
+            return 0
+        i += -1*readlen
+        rl -= -1*readlen
+
+        if propid in [1, 23, 25, 36, 37, 40, 41, 42]:
+            # byte
+            rl, value = ws_parse_byte(packet, rl, ws_data)
+            i += 1
+            ws_property_add_id(mqtt, propid)
+            ws_property_add_number(mqtt, value)
+        elif propid in [2, 17, 24, 39]:
+            # 4 byte integer
+            rl, value = ws_parse_uint32(packet, rl, ws_data)
+            i += 4
+            ws_property_add_id(mqtt, propid)
+            ws_property_add_number(mqtt, value)
+        elif propid in [3, 8, 18, 21, 26, 28, 31]:
+            # utf-8 string
+            ws_property_add_id(mqtt, propid)
+            readlen, value = ws_parse_string(packet, 0, ws_data)
+            i -= readlen
+            rl += readlen
+            ws_property_add_string(mqtt, value)
+        elif propid in [9, 22]:
+            # binary
+            readlen, value = ws_parse_binary(packet, 0, ws_data)
+            i -= readlen
+            rl += readlen
+            ws_property_add_id(mqtt, propid)
+            ws_property_add_string(mqtt, value)
+        elif propid in [11]:
+            # varint
+            readlen, value = ws_parse_varint(packet, 0, ws_data)
+            i -= readlen
+            rl += readlen
+            ws_property_add_id(mqtt, propid)
+            ws_property_add_number(mqtt, value)
+        elif propid in [19, 33, 34, 35]:
+            # two byte int
+            rl, value = ws_parse_uint16(packet, rl, ws_data)
+            i += 2
+            ws_property_add_id(mqtt, propid)
+            ws_property_add_number(mqtt, value)
+        elif propid in [38]:
+            # utf-8 string pair
+            readlen, key = ws_parse_string(packet, 0, ws_data)
+            i -= readlen
+            rl += readlen
+            readlen, value = ws_parse_string(packet, 0, ws_data)
+            i -= readlen
+            rl += readlen
+            ws_property_add_id(mqtt, propid)
+            ws_property_add_string_pair(mqtt, key, value)
+        else:
+            pass
+
+    return rl
+
+# -----------------
+# Packet types
+# -----------------
+def ws_parse_reserved(packet, protover, mqtt, rl, ws_data):
+    return rl
+
+
+def ws_parse_connect(packet, protover, cmd, mqtt, rl, ws_data):
+    rl, mqtt['mqtt_mqtt_protoname'] = ws_parse_string(packet, rl, ws_data)
+    rl, mqtt['mqtt_mqtt_ver'] = ws_parse_byte(packet, rl, ws_data)
+    rl, flags = ws_parse_byte(packet, rl, ws_data)
+    mqtt['mqtt_mqtt_conflag_cleansess'] = (flags & 0x02) > 0
+    mqtt['mqtt_mqtt_conflag_willflag'] = (flags & 0x04) > 0
+    mqtt['mqtt_mqtt_conflag_qos'] = str((flags & 0x18) >> 3)
+    mqtt['mqtt_mqtt_conflag_willretain'] = flags & 0x20 > 0
+    mqtt['mqtt_mqtt_conflag_passwd'] = flags & 0x40 > 0
+    mqtt['mqtt_mqtt_conflag_uname'] = flags & 0x80 > 0
+    rl, mqtt['mqtt_mqtt_kalive'] = ws_parse_uint16(packet, rl, ws_data)
+
+    if mqtt['mqtt_mqtt_ver'] == 5:
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    rl, mqtt['mqtt_mqtt_clientid'] = ws_parse_string(packet, rl, ws_data)
+    if mqtt['mqtt_mqtt_conflag_willflag']:
+        # FIXME - needs will specific prop parsing
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+        rl, mqtt['mqtt_mqtt_willtopic'] = ws_parse_string(packet, rl, ws_data)
+        rl, payloadlen = ws_parse_uint16(packet, rl, ws_data)
+        if payloadlen == errstr:
+            mqtt['mqtt_mqtt_willmsg_text'] = errstr
+            return 0
+
+        mqtt['mqtt_mqtt_willmsg_text'] = ""
+        for i in range(payloadlen):
+            rl, b = ws_parse_byte(packet, rl, ws_data)
+            if b == errstr:
+                mqtt['mqtt_mqtt_willmsg_text'] += errstr
+                return 0
+            mqtt['mqtt_mqtt_willmsg_text'] += chr(b)
+
+    if mqtt['mqtt_mqtt_conflag_uname']:
+        rl, mqtt['mqtt_mqtt_username'] = ws_parse_string(packet, rl, ws_data)
+    if mqtt['mqtt_mqtt_conflag_passwd']:
+        rl, mqtt['mqtt_mqtt_passwd'] = ws_parse_string(packet, rl, ws_data)
+
+    return rl
+
+
+def ws_parse_connack(packet, protover, mqtt, rl, ws_data):
+    rl, flags = ws_parse_byte(packet, rl, ws_data)
+    mqtt['mqtt_mqtt_conack_val'] = str(flags)
+
+    rl, reason_code = ws_parse_byte(packet, rl, ws_data)
+    mqtt['mqtt_mqtt_connack_reason_code'] = str(reason_code)
+
+    if protover == 5:
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    return rl
+
+
+def ws_parse_publish(packet, protover, cmd, mqtt, rl, ws_data):
+    dup = (cmd & 0x08)>>3
+    qos = (cmd & 0x06)>>1
+    retain = (cmd & 0x01)
+
+    mqtt['mqtt_mqtt_qos'] = str(qos)
+    mqtt['mqtt_mqtt_retain'] = str(retain)
+
+    rl, topic = ws_parse_string(packet, rl, ws_data)
+    mqtt['mqtt_mqtt_topic'] = topic
+
+    if qos > 0:
+        rl, mqtt['mqtt_mqtt_msgid'] = ws_parse_uint16(packet, rl, ws_data)
+
+    if protover == 5:
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    mqtt['mqtt_mqtt_msg_text'] = ""
+    while len(ws_data) > 0:
+        rl, b = ws_parse_byte(packet, rl, ws_data)
+        if b == errstr:
+            mqtt['mqtt_mqtt_msg_text'] += errstr
+            return 0
+        mqtt['mqtt_mqtt_msg_text'] += chr(b)
+
+    return rl
+
+
+def ws_parse_simple(packet, protover, mqtt, rl, ws_data):
+    rl, mqtt['mqtt_mqtt_msgid'] = ws_parse_uint16(packet, rl, ws_data)
+    if protover == 5:
+        if rl > 0:
+            rl, value = ws_parse_byte(packet, rl, ws_data)
+            mqtt['mqtt_mqtt_puback_reason_code'] = str(value)
+            if rl > 0:
+                rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+    return rl
+
+
+def ws_parse_subscribe(packet, protover, mqtt, rl, ws_data):
+    rl, mqtt['mqtt_mqtt_msgid'] = ws_parse_uint16(packet, rl, ws_data)
+
+    if protover == 5:
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    topics = []
+    qoss = []
+    while rl > 0:
+        rl, topic = ws_parse_string(packet, rl, ws_data)
+        rl, qos = ws_parse_byte(packet, rl, ws_data)
+        topics.append(topic)
+        qoss.append(qos)
+
+    if len(topics) == 1:
+        mqtt['mqtt_mqtt_topic'] = topics[0]
+        mqtt['mqtt_mqtt_sub_qos'] = qoss[0]
+    else:
+        mqtt['mqtt_mqtt_topic'] = topics
+        mqtt['mqtt_mqtt_sub_qos'] = qoss
+
+    return rl
+
+
+def ws_parse_suback(packet, protover, mqtt, rl, ws_data):
+    rl, mqtt['mqtt_mqtt_msgid'] = ws_parse_uint16(packet, rl, ws_data)
+
+    rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+    if rl == 1:
+        rl, b = ws_parse_byte(packet, rl, ws_data)
+        mqtt['mqtt_mqtt_suback_qos'] = str(b)
+    else:
+        mqtt['mqtt_mqtt_suback_qos'] = []
+        for i in range(0, rl):
+            rl, b = ws_parse_byte(packet, rl, ws_data)
+            mqtt['mqtt_mqtt_suback_qos'].append(str(b))
+
+    return 0
+
+
+def ws_parse_unsubscribe(packet, protover, mqtt, rl, ws_data):
+    rl, mqtt['mqtt_mqtt_msgid'] = ws_parse_uint16(packet, rl, ws_data)
+
+    if protover == 5:
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    topics = []
+    while rl > 0:
+        rl, topic = ws_parse_string(packet, rl, ws_data)
+        topics.append(topic)
+
+    if len(topics) == 1:
+        mqtt['mqtt_mqtt_topic'] = topics[0]
+    else:
+        mqtt['mqtt_mqtt_topic'] = topics
+    return rl
+
+
+def ws_parse_unsuback(packet, protover, mqtt, rl, ws_data):
+    rl, mqtt['mqtt_mqtt_msgid'] = ws_parse_uint16(packet, rl, ws_data)
+
+    if protover == 5:
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    if rl == 1:
+        rl, b = ws_parse_byte(packet, rl, ws_data)
+        mqtt['mqtt_mqtt_suback_qos'] = str(b)
+    else:
+        mqtt['mqtt_mqtt_suback_qos'] = []
+        for i in range(0, rl):
+            rl, b = ws_parse_byte(packet, rl, ws_data)
+            mqtt['mqtt_mqtt_suback_qos'].append(str(b))
+    return rl
+
+
+def ws_parse_pingreq(packet, protover, mqtt, rl, ws_data):
+    return rl
+
+
+def ws_parse_pingresp(packet, protover, mqtt, rl, ws_data):
+    return rl
+
+
+def ws_parse_disconnect(packet, protover, mqtt, rl, ws_data):
+    if protover == 5:
+        rl, reason_code = ws_parse_byte(packet, rl, ws_data)
+        mqtt['mqtt_mqtt_disconnect_reason_code'] = str(reason_code)
+        rl = ws_parse_properties(packet, mqtt, rl, ws_data)
+
+    return rl
+
+
+def ws_parse_auth(packet, protover, mqtt, rl, ws_data):
+    return rl
+
+# -----------------
+# Main WS functions
+# -----------------
+
+def set_malformed(packet):
+    print(",.....")
+    raise ValueError("")
+    packet['layers']['_ws_malformed'] = {}
+
+def ws_parse_packet(packet, ws_data):
+    mqtt = {}
+    b = ws_data.pop(0)
+    mqtt['mqtt_mqtt_hdrflags'] = f"0x{b}"
+    cmd_full = int(b, 16)
+    cmd = cmd_full & 0xF0
+    mqtt['mqtt_mqtt_msgtype'] = str(cmd)
+    _, rl = ws_parse_varint(packet, 0, ws_data)
+    mqtt['mqtt_mqtt_len'] = str(rl)
+    if rl == errstr:
+        return mqtt
+
+    protover = get_client_version(packet)
+
+    if cmd == 0x00:
+        rl = ws_parse_reserved(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x10:
+        rl = ws_parse_connect(packet, protover, cmd_full, mqtt, rl, ws_data)
+    elif cmd == 0x20:
+        rl = ws_parse_connack(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x30:
+        rl = ws_parse_publish(packet, protover, cmd_full, mqtt, rl, ws_data)
+    elif cmd == 0x40:
+        rl = ws_parse_simple(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x50:
+        rl = ws_parse_simple(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x60:
+        rl = ws_parse_simple(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x70:
+        rl = ws_parse_simple(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x80:
+        rl = ws_parse_subscribe(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0x90:
+        rl = ws_parse_suback(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0xA0:
+        rl = ws_parse_unsubscribe(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0xB0:
+        rl = ws_parse_unsuback(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0xC0:
+        rl = ws_parse_pingreq(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0xD0:
+        rl = ws_parse_pingresp(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0xE0:
+        rl = ws_parse_disconnect(packet, protover, mqtt, rl, ws_data)
+    elif cmd == 0xF0:
+        rl = ws_parse_auth(packet, protover, mqtt, rl, ws_data)
+
+    if rl > 0:
+        set_malformed(packet)
+    return mqtt
+
+def process_websockets(packet):
+    try:
+        websockets = packet['layers']['websocket']
+        data = packet['layers']['data']
+        if not isinstance(data, list):
+            data = [data]
+    except KeyError:
+        return
+
+    mqtt = []
+    for d in data:
+        ws_data = d['data_data_data'].split(":")
+        mqtt.append(ws_parse_packet(packet, ws_data))
+
+    #"mqtt_mqtt_hdr_reserved": "0",
+    if len(mqtt) == 1:
+        packet['layers']['mqtt'] = mqtt[0]
+    else:
+        packet['layers']['mqtt'] = mqtt
+
+
+# ============================================================
 # MAIN FUNCTIONS
 # ============================================================
 
@@ -844,6 +1397,9 @@ def process_packets(tshark, args):
             sys.exit(tshark.returncode)
 
         packet = json.loads(line)
+
+        process_websockets(packet)
+
         try:
             mqttlist = packet['layers']['mqtt']
         except KeyError:
@@ -906,20 +1462,43 @@ def main():
     if args.interface is not None:
         cmd += ["-i", args.interface]
 
-    ports = args.port.split(",")
-    p = f"tcp port {ports[0]}"
+    ports = []
+    ports_pre_split = args.port.split(",")
+    for i in range(len(ports_pre_split)):
+        try:
+            port,decode = ports_pre_split[i].split(":")
+        except ValueError:
+            port = ports_pre_split[i]
+            decode = "mqtt"
+        if decode != "mqtt" and decode != "mqtts" and decode != "ws" and decode != "wss":
+            print(f"Error: Protocol decode must be one of mqtt, mqtts, ws, wss.")
+            exit(1)
+
+        ports.append((port, decode))
+
+    p = f"tcp port {ports[0][0]}"
     for i in range(1, len(ports)):
-        p += f" or tcp port {ports[i]}"
+        p += f" or tcp port {ports[i][0]}"
     cmd += ["-f", p]
 
     if args.tls_keylog is not None:
         cmd += ['-o', f'tls.keylog_file:{args.tls_keylog}']
-        decode_proto = "tls"
-    else:
-        decode_proto = "mqtt"
 
-    for port in ports:
-        cmd += ["-d", f"tcp.port=={port},{decode_proto}"]
+    for port,decode in ports:
+        if decode == "mqtt":
+            cmd += ["-d", f"tcp.port=={port},mqtt"]
+        elif decode == "mqtts":
+            if args.tls_keylog is None:
+                print("Error: Trying to use mqtts without --tls-keylog will not work.")
+                exit(1)
+            cmd += ["-d", f"tcp.port=={port},tls", "-d", f"tls.port=={port},mqtt"]
+        elif decode == "ws":
+            cmd += ["-d", f"tcp.port=={port},http"]
+        elif decode == "wss":
+            if args.tls_keylog is None:
+                print("Error: Trying to use wss without --tls-keylog will not work.")
+                exit(1)
+            cmd += ["-d", f"tcp.port=={port},tls", "-d", f"tls.port=={port},http"]
 
     if args.default_version is not None:
         if args.default_version == 3:

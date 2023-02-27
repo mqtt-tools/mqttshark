@@ -3,10 +3,11 @@
 mqttshark will run tshark, the terminal network packet capture tool, and
 attempt to pretty print any MQTT messages received.
 
-It is still a long way from being complete, but is nevertheless useful right now.
+It can decode MQTT packets tunnelled over WebSockets, and can decode TLS
+packets when pre-keys are available.
 
-It requires at least Python 3.6, and possibly something more recent than that.
-It also requires tshark to be installed.
+mqttshark requires at least Python 3.6, and possibly something more recent than
+that. It also requires tshark to be installed.
 
 ## Usage
 
@@ -26,7 +27,18 @@ Run on a specific network interface:
 mqttshark -i eth0
 ```
 
-There are lots of ways of choosing how to display the output, see the help:
+Further examples:
+
+```
+mqttshark -p 1234:mqtt # Listen on port 1234, decoding as MQTT
+mqttshark -p 1234:mqtts --tls-keylog <file> # Listen on port 1234, decoding as MQTT over TLS.
+mqttshark -p 1234:ws # Listen on port 1234, decoding as WebSockets
+mqttshark -p 1234:mqtts --tls-keylog <file> # Listen on port 1234, decoding as MQTT over WebSockets over TLS.
+mqttshark -p 1883:mqtt,8883:mqtts,8080:ws,8081:wss # Listen on multiple ports
+```
+
+There are lots of ways of choosing how to display the output and suppress /
+pick which packets to display, see the help:
 ```
 mqttshark -h
 ```
@@ -34,7 +46,6 @@ mqttshark -h
 ## Bugs
 
 * Will properties are not displayed - this seems to be a missing feature in tshark
-* v5 subscription options are not displayed
 * Payloads with new lines may cause problems
 
 ## Contact

@@ -43,6 +43,13 @@ pick which packets to display, see the help:
 mqttshark -h
 ```
 
+## Display
+
+This explains the meaning of some of the output:
+
+![display output](details.png)
+
+
 ## Bugs
 
 * Will properties are not displayed - this seems to be a missing feature in tshark

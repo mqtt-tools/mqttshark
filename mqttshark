@@ -107,7 +107,7 @@ all_props = {
    "0x13": ("server-keep-alive", "num"),
    "0x15": ("authentication-method", "string"),
    "0x16": ("authentication-data", "string"),
-   "0x17": ("request-problem-information", "string"),
+   "0x17": ("request-problem-information", "num"),
    "0x18": ("will-delay-interval", "num"),
    "0x19": ("request-response-information", "num"),
    "0x1a": ("response-information", "string"),

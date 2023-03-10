@@ -666,7 +666,6 @@ def print_subscribe(args, packet, mqtt):
             print_offset()
             if len(topic[i]) > args.truncate_topic:
                 topic[i] = topic[i][:args.truncate_topic] + "…"
-            print("...")
             print_sub_options(qos[i])
             print(f'  topic="{topic_colour}{topic[i]}{ansi_reset}"')
     print_properties(args, mqtt)

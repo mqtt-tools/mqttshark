@@ -145,6 +145,7 @@ qos_colour = ansi_br_cyan
 username_colour = ansi_br_cyan
 password_colour = ansi_br_cyan
 retain_colour = ansi_br_cyan
+dup_colour = ansi_br_cyan
 sub_opt_colour = ansi_br_cyan
 rc_colour = ansi_br_cyan
 
@@ -567,6 +568,12 @@ def print_publish(args, packet, mqtt):
     except KeyError:
         retain = errstr
     print(f"retain={retain_colour}{retain}{ansi_reset}", end="")
+
+    try:
+        if mqtt['mqtt_mqtt_dupflag']:
+            print(f"  {dup_colour}dup{ansi_reset}", end="")
+    except KeyError:
+        pass
 
     try:
         topic = mqtt["mqtt_mqtt_topic"]

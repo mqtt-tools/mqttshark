@@ -338,8 +338,8 @@ def print_session_ports(packet):
 
 
 def set_client_mapping(packet):
-    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
-    dst = "%s:%s" % (packet['layers']['ip']['ip_ip_dst'], packet['layers']['tcp']['tcp_tcp_dstport'])
+    src = "%s:%s" % (decode_ip_peer(packet, 'src'), packet['layers']['tcp']['tcp_tcp_srcport'])
+    dst = "%s:%s" % (decode_ip_peer(packet, 'dst'), packet['layers']['tcp']['tcp_tcp_dstport'])
     try:
         c = client_mapping[src]
     except KeyError:
@@ -351,20 +351,22 @@ def set_client_mapping(packet):
 
 
 def set_client_version(packet, ver):
-    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
-    dst = "%s:%s" % (packet['layers']['ip']['ip_ip_dst'], packet['layers']['tcp']['tcp_tcp_dstport'])
+    src = "%s:%s" % (decode_ip_peer(packet, 'src'), packet['layers']['tcp']['tcp_tcp_srcport'])
+    dst = "%s:%s" % (decode_ip_peer(packet, 'dst'), packet['layers']['tcp']['tcp_tcp_dstport'])
     client_versions[src] = ver
     client_versions[dst] = ver
 
+
 def get_client_version(packet):
-    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
+    src = "%s:%s" % (decode_ip_peer(packet, 'src'), packet['layers']['tcp']['tcp_tcp_srcport'])
     try:
         return client_versions[src]
     except KeyError:
         return 4
 
+
 def check_client_mapping(packet):
-    src = "%s:%s" % (packet['layers']['ip']['ip_ip_src'], packet['layers']['tcp']['tcp_tcp_srcport'])
+    src = "%s:%s" % (decode_ip_peer(packet, 'src'), packet['layers']['tcp']['tcp_tcp_srcport'])
     try:
         c = client_mapping[src]
         return c
@@ -381,6 +383,16 @@ def print_origin(packet, expected=None):
             print(f" {ansi_error}{r}{ansi_reset}", end="")
     else:
         print(f" {r}", end="")
+
+
+def decode_ip_peer(packet, peer_type):
+    assert peer_type in ['src', 'dst'], f'Peer kind invalid: {peer_type}'
+    if 'ip' in packet['layers']:
+        return packet['layers']['ip'][f'ip_ip_{peer_type}']
+    elif 'ipv6' in packet['layers']:
+        return packet['layers']['ipv6'][f'ipv6_ipv6_{peer_type}']
+    else:
+        raise ValueError(f'No "ip" or "ipv6" in packet layer')
 
 
 

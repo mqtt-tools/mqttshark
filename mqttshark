@@ -877,7 +877,7 @@ def get_args():
     parser = argparse.ArgumentParser(
         prog="mqttshark",
         description="Pretty print MQTT traffic from tshark",
-        epilog="https://github.com/ralight/mqttshark"
+        epilog="https://github.com/mqtt-tools/mqttshark"
     )
     parser.add_argument(
         '-i', '--interface', action='store',

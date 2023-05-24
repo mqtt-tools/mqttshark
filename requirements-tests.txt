@@ -1,0 +1,4 @@
+pytest
+pytest-mqtt
+runs
+strip-ansi

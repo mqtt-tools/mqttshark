@@ -32,6 +32,11 @@ jobs:
     name: Python ${{ matrix.python-version }} on OS ${{ matrix.os }}
     steps:
 
+    - name: Install prerequisites
+      run: |
+        sudo apt update
+        sudo apt install --no-install-recommends --no-install-suggests --yes mosquitto-clients tshark
+
     - name: Acquire sources
       uses: actions/checkout@v3
 
@@ -46,7 +51,12 @@ jobs:
 
     - name: Environment information
       run: |
-        ifconfig
+        set -x
+        sudo ifconfig
+        sudo tshark --list-interfaces
+        sudo tshark --list-data-link-types -i lo
+        sudo tshark --list-data-link-types -i eth0
+        sudo tshark --list-data-link-types -i docker0
 
     - name: Setup project
       run: |

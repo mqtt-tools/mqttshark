@@ -22,9 +22,13 @@ def test_cli_capture(capfd, mosquitto):
     """
     Verify capturing a single MQTT PUBLISH succeeds.
     """
+    interface_name = "lo"
+    if sys.platform == "darwin":
+        interface_name = "lo0"
+
     ev = threading.Event()
     def mqttshark():
-        run_mqttshark("-i lo0")
+        run_mqttshark(f"-i {interface_name}")
     t = threading.Thread(target=mqttshark)
     t.start()
     ev.wait(0.5)

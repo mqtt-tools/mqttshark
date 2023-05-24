@@ -44,6 +44,10 @@ jobs:
         cache-dependency-path: |
           requirements-*.txt
 
+    - name: Environment information
+      run: |
+        ifconfig
+
     - name: Setup project
       run: |
         pip install --use-pep517 --prefer-binary --requirement requirements-tests.txt 

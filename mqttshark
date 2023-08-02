@@ -398,16 +398,22 @@ def decode_ip_peer(packet, peer_type):
         raise ValueError(f'No "ip" or "ipv6" in packet layer')
 
 
-def decode_mqtt_payload(payload):
+def decode_mqtt_payload(mqtt):
     """
     Gracefully attempt to decode MQTT message payload from UTF-8.
     If that fails, return the original data, which is a hexlified string.
     """
     try:
-        return bytearray.fromhex(payload.replace(":", "")).decode("utf-8")
-    except:
-        return payload
-
+        payload = mqtt['mqtt_mqtt_msg']
+        try:
+            return bytearray.fromhex(payload.replace(":", "")).decode("utf-8")
+        except:
+            return errstr
+    except KeyError:
+        try:
+            return mqtt['mqtt_mqtt_msg_text']
+        except KeyError:
+            return errstr
 
 
 # ============================================================
@@ -559,12 +565,9 @@ def print_publish(args, packet, mqtt):
     if "PUBLISH" in args.suppress or (len(args.pick) > 0 and "PUBLISH" not in args.pick):
         return
 
-    try:
-        payload = decode_mqtt_payload(mqtt['mqtt_mqtt_msg'])
-        if len(payload) > args.truncate_payload:
-            payload = payload[:args.truncate_payload] + "…"
-    except KeyError:
-        payload = errstr
+    payload = decode_mqtt_payload(mqtt)
+    if len(payload) > args.truncate_payload:
+        payload = payload[:args.truncate_payload] + "…"
 
     try:
         qos = mqtt['mqtt_mqtt_qos']

@@ -270,7 +270,10 @@ def print_properties(args, mqtt):
         try:
             (name, prop_type) = all_props[prop_id]
             key = None
-            if prop_type == "num":
+
+            if prop_id == "0x23":
+                value = mqtt['mqtt_mqtt_property_topic_alias']
+            elif prop_type == "num":
                 try:
                     value = prop_numbers.pop(0)
                 except AttributeError:

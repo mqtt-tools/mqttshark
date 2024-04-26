@@ -276,21 +276,21 @@ def print_properties(args, mqtt):
             elif prop_type == "num":
                 try:
                     value = prop_numbers.pop(0)
-                except AttributeError:
+                except (AttributeError, IndexError):
                     value = errstr
             elif prop_type == "string":
                 try:
                     value = prop_strings.pop(0)
-                except AttributeError:
+                except (AttributeError, IndexError):
                     value = errstr
             elif prop_type == "stringpair":
                 try:
                     key = prop_keys.pop(0)
-                except AttributeError:
+                except (AttributeError, IndexError):
                     key = errstr
                 try:
                     value = prop_values.pop(0)
-                except AttributeError:
+                except (AttributeError, IndexError):
                     value = errstr
             if key is None:
                 print(f"{name} {property_colour}{value}{ansi_reset}")

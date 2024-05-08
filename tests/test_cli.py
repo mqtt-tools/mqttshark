@@ -35,7 +35,7 @@ def test_cli_capture(capfd, mosquitto):
 
     command = """mosquitto_pub -t 'testdrive' -m '{"temperature": 42.42}'"""
     runs.run(command)
-    ev.wait(0.25)
+    ev.wait(0.5)
 
     runs.run("sudo pkill tshark")
     ev.wait(0.25)
@@ -75,5 +75,4 @@ def run_mqttshark(arguments):
     """
     command = f"sudo python mqttshark {arguments}"
     response = runs.run(command)
-    if response:
-        return response[0]
+    return response

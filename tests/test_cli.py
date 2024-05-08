@@ -1,4 +1,3 @@
-import imp
 import shlex
 import sys
 import threading
@@ -50,6 +49,7 @@ def test_cli_capture(capfd, mosquitto):
     assert 'DISCONNECT' in out
 
 
+@pytest.mark.skipif(sys.version_info >= (3, 12), reason="Does not work on Python 3.12")
 def test_cli_load_module(capsys):
     """
     Basic test function, loading `mqttshark` as Python module.
@@ -58,6 +58,8 @@ def test_cli_load_module(capsys):
     :param capsys:
     :return:
     """
+    import imp
+
     command = "mqttshark --version"
     sys.argv[1:] = shlex.split(command)
     with pytest.raises(SystemExit):

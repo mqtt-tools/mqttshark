@@ -420,6 +420,13 @@ def decode_mqtt_payload(mqtt):
 # Packet printing functions
 # ============================================================
 
+def print_closing(packet):
+    """Called if a socket connection closes"""
+    print_timestamp(packet)
+    print_session_ports(packet)
+    print_origin(packet, "")
+    print(f" {ansi_red}✘{ansi_reset} CLOSED")
+
 def print_malformed(args, packet, mqtt):
     """Called if a very malformed packet is received"""
     print_timestamp(packet)
@@ -1442,6 +1449,11 @@ def process_packets(tshark, args):
         try:
             mqttlist = packet['layers']['mqtt']
         except KeyError:
+            try:
+                if packet['layers']['tcp']['tcp_tcp_flags_fin'] and packet['layers']['tcp']['tcp_tcp_flags_ack']:
+                    print_closing(packet)
+            except KeyError:
+                pass
             continue
 
         if not isinstance(mqttlist, list):

@@ -876,7 +876,7 @@ def print_auth(args, packet, mqtt):
     print_session_ports(packet)
     print_origin(packet)
     print(f" {AUTH_colour}AUTH{ansi_reset}        rl={mqtt['mqtt_mqtt_len']}")
-    print_properties(args, packet)
+    print_properties(args, mqtt)
 
 
 # ============================================================

@@ -443,6 +443,24 @@ def decode_mqtt_payload(mqtt):
         except KeyError:
             return errstr
 
+def decode_will_payload(mqtt):
+
+    """
+    Gracefully attempt to decode MQTT message payload from UTF-8.
+    If that fails, return the original data, which is a hexlified string.
+    """
+    try:
+        payload = mqtt['mqtt_mqtt_willmsg']
+        try:
+            return bytearray.fromhex(payload.replace(":", "")).decode("utf-8")
+        except:
+            return errstr
+    except KeyError:
+        try:
+            return mqtt['mqtt_mqtt_willmsg_text']
+        except KeyError:
+            return errstr
+
 
 # ============================================================
 # Packet printing functions
@@ -496,12 +514,7 @@ def print_will(args, mqtt):
     except KeyError:
         qos = errstr
 
-    try:
-        payload = mqtt['mqtt_mqtt_willmsg_text']
-        if len(payload) > args.truncate_payload:
-            payload = payload[:args.truncate_payload] + "…"
-    except KeyError:
-        payload = errstr
+    payload = decode_will_payload(mqtt)
 
     print(" "*(len(timestr)+1+5+2+5+1+2), end="")
     print(f"{WILL_colour}WILL{ansi_reset}        ", end="")

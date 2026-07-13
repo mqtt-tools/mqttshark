@@ -60,6 +60,7 @@ jobs:
       run: |
         set -x
         sudo ifconfig
+        sudo tshark --version
         sudo tshark --list-interfaces
         sudo tshark --list-data-link-types -i lo
         sudo tshark --list-data-link-types -i eth0
